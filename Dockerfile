@@ -1,41 +1,36 @@
-# React Application
-FROM node:18-alpine AS build
+# Use multi-stage builds
+FROM node:18-alpine AS builder
 
+# Set working directory
 WORKDIR /app
 
-# Copy package files
-COPY package.json package-lock.json* yarn.lock* pnpm-lock.yaml* ./
+# Copy package.json and package-lock.json (or yarn.lock/pnpm-lock.yaml)
+COPY package.json ./
 
-# Install dependencies
-RUN npm ci
+# Install dependencies.  Install production dependencies first to leverage caching.
+ARG NODE_ENV=production
+RUN if [ "$NODE_ENV" = "production" ]; then npm ci --only=production; else npm install; fi
 
-# Copy source code
-COPY . ./
+# Copy the rest of the application code
+COPY . .
 
 # Build the application
 RUN npm run build
 
-# Production stage with nginx
-FROM nginx:stable-alpine
+# --- Production Stage ---
+FROM nginx:alpine
 
-# Copy built assets
-COPY --from=build /app/build /usr/share/nginx/html
+# Copy the build output from the builder stage
+COPY --from=builder /app/build /usr/share/nginx/html
 
-# Copy nginx configuration if it exists, otherwise use default
-COPY nginx.conf /etc/nginx/nginx.conf 2>/dev/null || true
+# Copy nginx configuration (if you have one, otherwise use the default)
+# COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Create non-root user
-RUN addgroup -g 1001 -S nginx && adduser -S -D -H -u 1001 -h /var/cache/nginx -s /sbin/nologin -G nginx -g nginx nginx
-
-# Set proper permissions
-RUN chown -R nginx:nginx /usr/share/nginx/html
-
-USER nginx
-
+# Expose port 80
 EXPOSE 80
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:80/ || exit 1
+# Set environment variables (if needed)
+ENV NODE_ENV production
 
+# Start nginx
 CMD ["nginx", "-g", "daemon off;"]
